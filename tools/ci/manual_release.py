@@ -362,7 +362,8 @@ def apk():
             "assets/agy-tools/install_phone_mcp.py",
             "lib/arm64-v8a/libproot.so",
             "lib/arm64-v8a/libXlorie.so",
-            "lib/arm64-v8a/libinstall_files.so",
+            "lib/arm64-v8a/libcodex-install.so",
+            "lib/arm64-v8a/libcodex-device-files.so",
         }
         missing = sorted(required_entries - names)
         if missing:
