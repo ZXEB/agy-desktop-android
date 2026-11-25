@@ -18,6 +18,8 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
@@ -405,6 +407,42 @@ def upload_release_asset(repository, release_id, path):
             return json.load(response)
 
 
+def create_release(repository, tag, source_commit, title, description):
+    endpoint = f"repos/{repository}/releases"
+    body = json.dumps({
+        "tag_name": tag,
+        "target_commitish": source_commit,
+        "name": title,
+        "body": description,
+        "draft": True,
+    }).encode("utf-8")
+    for attempt in range(1, 5):
+        pages = json.loads(run(["gh", "api", "--paginate", "--slurp", endpoint + "?per_page=100"]))
+        matches = [release for page in pages for release in page if release["tag_name"] == tag]
+        if matches:
+            if len(matches) != 1 or matches[0]["target_commitish"] != source_commit:
+                raise ValueError(f"Release tag {tag} is already associated with another release")
+            return matches[0]
+
+        request = urllib.request.Request(
+            f"https://api.github.com/{endpoint}", data=body, method="POST", headers={
+                "Authorization": "Bearer " + os.environ["GH_TOKEN"],
+                "Accept": "application/vnd.github+json",
+                "Content-Type": "application/json",
+                "User-Agent": "agy-android-cloud-build",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as error:
+            if error.code not in {500, 502, 503, 504} or attempt == 4:
+                raise
+            print(f"Release creation returned HTTP {error.code}; checking for a draft before retrying.",
+                  flush=True)
+            time.sleep(2 ** attempt)
+
+
 def publish():
     value = json.loads((WORK / "release/build-info.json").read_text(encoding="utf-8"))
     env = os.environ
@@ -416,26 +454,28 @@ def publish():
         f"- **应用包名**：`com.ai.agy`\n"
         f"- **APK SHA-256**：`{value['apkSha256']}`\n"
     )
-    notes = WORK / "release-notes.txt"
-    notes.write_text(description, encoding="utf-8")
-
-    # Create draft release, upload assets, then publish
-    command("release-create", [
-        "gh", "release", "create", tag, "--repo", repository,
-        "--target", value["sourceCommit"],
-        "--title", f"Antigravity Android {tag} (Desktop {value['desktopVersion']})",
-        "--notes-file", notes, "--draft",
-    ])
-    rows = json.loads(run(["gh", "api", f"repos/{repository}/releases?per_page=100"]))
-    metadata = next(item for item in rows if item["tag_name"] == tag)
+    metadata = create_release(
+        repository, tag, value["sourceCommit"],
+        f"Antigravity Android {tag} (Desktop {value['desktopVersion']})", description,
+    )
+    assets = {asset["name"]: asset for asset in metadata["assets"]}
     for path in files:
-        upload_release_asset(repository, metadata["id"], path)
-    pub_json = WORK / "publish-release.json"
-    save(pub_json, {"draft": False, "body": description})
-    result = json.loads(command("release-publish", [
-        "gh", "api", "--method", "PATCH",
-        f"repos/{repository}/releases/{metadata['id']}", "--input", pub_json,
-    ]))
+        if path.name in assets:
+            asset = assets[path.name]
+            if asset["state"] != "uploaded" or asset.get("digest") != f"sha256:{digest(path)}":
+                raise ValueError(f"Release {tag} already has a different asset named {path.name}")
+        elif metadata["draft"]:
+            upload_release_asset(repository, metadata["id"], path)
+        else:
+            raise ValueError(f"Published release {tag} is missing {path.name}")
+    result = metadata
+    if metadata["draft"]:
+        pub_json = WORK / "publish-release.json"
+        save(pub_json, {"draft": False, "body": description})
+        result = json.loads(command("release-publish", [
+            "gh", "api", "--method", "PATCH",
+            f"repos/{repository}/releases/{metadata['id']}", "--input", pub_json,
+        ]))
     print(result["html_url"])
     if env.get("GITHUB_STEP_SUMMARY"):
         with Path(env["GITHUB_STEP_SUMMARY"]).open("a") as stream:
