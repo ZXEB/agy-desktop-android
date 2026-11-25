@@ -1,7 +1,7 @@
 {
   "schema": "codex.ci-native-baseline.v1",
-  "url": "https://github.com/JinShichang/codex-desktop-android/releases/download/ci-native-baseline-v60/Codex-Android-v60-native-baseline.apk",
-  "sha256": "cc4fd8909f80f43e10df8eabfa3ad7136832b2b840529d8096da589f0f849b5f",
+  "url": "https://github.com/JinShichang/codex-desktop-android/releases/download/v80/Codex-Android-v80-small.apk",
+  "sha256": "9d9101e1a80bdaf492c02e5abc71b550cb9658aa83782e410d76cef400d12e6b",
   "certificateSha256": "39d204ce0a7ee777f4aa0aab5085d6669e1dc744463912f31509eafea74b0d31",
   "nativeRebuilt": false
 }
