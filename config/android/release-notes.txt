@@ -1,0 +1,10 @@
+# Google Antigravity Desktop Android
+
+将 Google Antigravity Linux ARM64 桌面端与 Debian 13 ARM64 运行环境打包为一体化 Android APK，支持在手机上运行 Antigravity 桌面工作区、本地开发命令、中文输入、高刷全屏、共享存储项目（`/sdcard/agy/Projects`）、`.gemini` 配置共享、ColorOS/Android 实时通知灵动岛，以及通过 MCP 操控手机。
+
+## 首次使用提示
+
+- 请在手机「开发者选项」中关闭「限制子进程」（或通过 ADB 设置 `max_phantom_processes 999999999`），避免 Agent 创建大量子进程时被系统回收。
+- 完整 APK 已内置 Linux 运行环境包（`agy-phone-rootfs.tgz`），首次启动会自动流式解压并初始化本机账户与加密密钥环（约需数分钟）。
+- 建议设备：Android 14/15+，内存 12GB 及以上。
+- 长按应用图标可快速打开 **Android 工具**（图形加速/兼容模式切换、日志导出、手机操控、所有文件访问权限）和 **Antigravity 显示设置**。

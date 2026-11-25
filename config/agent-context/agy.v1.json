@@ -1,0 +1,27 @@
+{
+  "schema": "agy.agent-environment.v1",
+  "revision": "agy-android.v1",
+  "product": "Google Antigravity Desktop Android",
+  "clientHost": {
+    "referenceDevice": "Android ARM64",
+    "androidRoot": false,
+    "referenceApi": 35,
+    "architecture": "arm64-v8a",
+    "applicationName": "Antigravity",
+    "androidVersion": "15",
+    "socModel": "unknown",
+    "kernelVersion": "unknown",
+    "timezone": "UTC",
+    "sharedStorage": {
+      "allFilesAccess": false,
+      "readWriteVerified": false
+    }
+  },
+  "guest": {
+    "distro": "Debian 13 (Trixie) ARM64 via PRoot",
+    "desktop": "/opt/antigravity/Antigravity-arm64/antigravity",
+    "cli": "/usr/local/bin/agy",
+    "configDir": "~/.gemini/config",
+    "sharedProjectsDir": "/sdcard/agy/Projects"
+  }
+}

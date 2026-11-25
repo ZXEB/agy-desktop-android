@@ -1,0 +1,21 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Orbital Antigravity ring -->
+    <path
+        android:pathData="M24,62 C24,42 40,26 54,26 C68,26 84,42 84,62"
+        android:strokeWidth="6.5"
+        android:strokeColor="#60A5FA"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+    <!-- Rising A-chevron emblem -->
+    <path
+        android:pathData="M34,78 L54,30 L74,78 L64.5,78 L54,51 L43.5,78 Z"
+        android:fillColor="#FFFFFF" />
+    <!-- Floating gravity spark -->
+    <path
+        android:pathData="M54,60 m-5.5,0 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0"
+        android:fillColor="#38BDF8" />
+</vector>

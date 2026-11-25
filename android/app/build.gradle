@@ -1,0 +1,130 @@
+apply plugin: 'com.android.application'
+apply from: '../../tools/recovery/android-signing.gradle'
+
+android {
+    namespace 'com.ai.codex'
+    compileSdk 37
+    ndkVersion '29.0.14206865'
+    defaultConfig {
+        applicationId 'com.ai.agy'
+        minSdk 30
+        targetSdk 37
+        versionCode providers.gradleProperty('agyVersionCode').map { it.toInteger() }.getOrElse(10)
+        versionName providers.gradleProperty('agyVersionName').getOrElse('0.1.0-agy')
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+    packaging { jniLibs { useLegacyPackaging true } }
+    sourceSets.main.jniLibs.srcDirs = [providers.gradleProperty('codexRuntimeJni').getOrElse('../native/runtime')]
+    externalNativeBuild { cmake { path '../install-native/CMakeLists.txt'; version '3.22.1' } }
+    buildTypes {
+        debug { debuggable true }
+        release { minifyEnabled false }
+    }
+    buildFeatures { aidl true }
+}
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.1.5'
+    implementation project(':lorie')
+    implementation 'com.github.MuntashirAkon:libadb-android:3.1.1'
+    implementation 'org.conscrypt:conscrypt-android:2.5.3'
+    implementation 'org.bouncycastle:bcpkix-jdk15to18:1.81'
+    implementation 'androidx.appcompat:appcompat:1.7.1'
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
+    implementation 'androidx.window:window-java:1.5.0'
+    implementation 'org.apache.commons:commons-compress:1.28.0'
+    implementation 'com.google.mlkit:text-recognition-chinese:16.0.1'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20260719'
+}
+
+abstract class AgySyncAssets extends Sync {
+    @OutputDirectory abstract DirectoryProperty getOutputDir()
+}
+
+// Complete first-install Antigravity Linux ARM64 runtime image (embedded in full APK).
+def phoneImageAssets = providers.gradleProperty('agyPhoneImageAssets')
+        .orElse(providers.gradleProperty('codexPhoneImageAssets'))
+if (phoneImageAssets.isPresent()) {
+    def supplied = file(phoneImageAssets.get()).canonicalFile
+    def releaseFile = new File(supplied, 'phone-runtime/release.json')
+    def inventoryFile = new File(supplied, 'phone-runtime/inventory.json')
+    if (!releaseFile.isFile() || !inventoryFile.isFile()) {
+        throw new GradleException('Complete phone image release assets are missing')
+    }
+    def release = new groovy.json.JsonSlurper().parse(releaseFile)
+    def hash = java.security.MessageDigest.getInstance('SHA-256').digest(inventoryFile.bytes).encodeHex().toString()
+    if (release.format != 'agy.phone-image.v1' || hash != release.inventorySha256
+            || inventoryFile.length() != release.inventoryBytes
+            || release.accountIncluded || release.keyringIncluded) {
+        throw new GradleException('Complete phone image release assets do not match their inventory')
+    }
+    def embedArchive = providers.gradleProperty('agyEmbedPhoneImage')
+            .orElse(providers.gradleProperty('codexEmbedPhoneImage')).getOrElse('false').toBoolean()
+    if (embedArchive) {
+        def archive = new File(supplied, 'phone-runtime/agy-phone-rootfs.tar.gz')
+        if (!archive.isFile() || archive.length() != release.spec.compressedBytes) {
+            throw new GradleException('The full APK requires its matching embedded rootfs archive')
+        }
+        // AGP expands assets ending in .gz before APK packaging. Store raw gzip as .tgz without recompression.
+        android.androidResources.noCompress.add('tgz')
+    }
+    def stagedImage = layout.buildDirectory.dir('generated/phoneImageAssets')
+    def syncPhoneImageAssets = tasks.register('syncPhoneImageAssets', AgySyncAssets) {
+        from(supplied) {
+            include 'phone-runtime/release.json', 'phone-runtime/inventory.json'
+            if (embedArchive) include 'phone-runtime/agy-phone-rootfs.tar.gz'
+            rename { name -> name == 'agy-phone-rootfs.tar.gz' ? 'agy-phone-rootfs.tgz' : name }
+        }
+        outputDir.set(stagedImage)
+        into outputDir
+    }
+    androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+        variant.sources.assets.addGeneratedSourceDirectory(syncPhoneImageAssets) { it.outputDir }
+    }
+}
+
+def localToolsAssets = layout.buildDirectory.dir('generated/agyToolsAssets')
+def syncLocalToolsAssets = tasks.register('syncAgyToolsAssets', AgySyncAssets) {
+    from(rootProject.file('../third-party/dsh-go-phone')) { into 'dsh-go-phone-notices' }
+    from(rootProject.file('../plugins/codex-android')) { into 'agy-android'; exclude '**/__pycache__/**', '**/*.pyc' }
+    from(rootProject.file('../tools/runtime/install_phone_mcp.py')) { into 'agy-tools' }
+    from(rootProject.file('../tools/runtime/codex_native_dialogs.py')) { into 'agy-tools' }
+    from(rootProject.file('../tools/runtime/codex-phone-dialogs.css')) { into 'agy-tools' }
+    from(rootProject.file('../runtime/guest/agy-session.sh')) { into 'agy-tools' }
+    from(rootProject.file('../runtime/guest')) {
+        include 'codex_ime.py', 'keyboard-focus.js', 'codex-graphics.sh', 'codex-software-probe.py'
+        into 'agy-tools'
+    }
+    from(rootProject.file('../config/agent-context/agy.v1.json')) {
+        into 'agy-tools'
+        rename { 'agent-environment.v1.json' }
+    }
+    outputDir.set(localToolsAssets)
+    into outputDir
+}
+androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+    variant.sources.assets.addGeneratedSourceDirectory(syncLocalToolsAssets) { it.outputDir }
+}
+
+tasks.register('verifyRuntimeLibraries') {
+    doLast {
+        def runtime = file(providers.gradleProperty('codexRuntimeJni').getOrElse('../native/runtime'))
+        def allowed = ['libproot.so', 'libproot-loader.so', 'libproot-loader32.so',
+                       'libtalloc.so', 'libandroid-shmem.so']
+            .collect { 'arm64-v8a/' + it }.toSet()
+        def actual = fileTree(runtime).files.collect {
+            runtime.toPath().relativize(it.toPath()).toString().replace('\\', '/')
+        }.toSet()
+        if (actual != allowed) {
+            throw new GradleException("Native runtime inputs differ: missing=${allowed - actual}, unexpected=${actual - allowed}.")
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'verifyRuntimeLibraries' }

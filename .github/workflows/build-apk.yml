@@ -1,0 +1,275 @@
+name: Build Antigravity Android APK
+run-name: Antigravity APK / desktop ${{ inputs.desktop_version || 'latest' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktop_version:
+        description: 'Official Google Antigravity Linux ARM64 version (latest or exact build e.g. 2.35.1-4615540875067392)'
+        type: string
+        default: latest
+      desktop_url:
+        description: 'Optional direct HTTPS URL override for Antigravity.tar.gz'
+        type: string
+        required: false
+      rebuild:
+        description: 'Bypass component cache; normally reuse unchanged Debian/Mesa builds'
+        type: choice
+        default: none
+        options: [none, base, mesa, all]
+      version_code:
+        description: 'Android versionCode; blank = source versionCode + workflow run number'
+        type: string
+        required: false
+      release_tag:
+        description: 'GitHub Release tag; blank = v<versionCode>'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agy-full-apk
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  GRADLE_USER_HOME: ${{ github.workspace }}/work/manual-release/gradle-home
+
+jobs:
+  plan:
+    name: Resolve versions and verify source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      base_key: ${{ steps.keys.outputs.base_key }}
+      mesa_key: ${{ steps.keys.outputs.mesa_key }}
+      native_key: ${{ steps.keys.outputs.native_key }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify source integrity
+        run: python3 -B tools/ci/check-source-integrity.py
+      - name: Resolve and freeze official Antigravity ARM64 version
+        env:
+          INPUT_DESKTOP_VERSION: ${{ inputs.desktop_version }}
+          INPUT_DESKTOP_URL: ${{ inputs.desktop_url }}
+          INPUT_VERSION_CODE: ${{ inputs.version_code }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+        run: python3 -B tools/ci/manual_release.py plan
+      - name: Fingerprint component recipes
+        id: keys
+        run: python3 -B tools/ci/release_components.py keys
+      - name: Upload frozen plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-plan
+          path: work/manual-release/plan.json
+          retention-days: 3
+          overwrite: true
+          if-no-files-found: error
+
+  client:
+    name: Download & verify Google Antigravity ARM64
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: work/manual-release
+      - run: python3 -B tools/ci/manual_release.py client
+      - run: python3 -B tools/ci/release_components.py pack client
+      - uses: actions/upload-artifact@v4
+        with:
+          name: component-client
+          path: work/manual-release/components/client
+          retention-days: 3
+          compression-level: 0
+          overwrite: true
+          if-no-files-found: error
+      - if: always()
+        uses: ./.github/actions/release-diagnostics
+
+  native:
+    name: Fetch & verify PRoot/X11 native libraries
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: work/manual-release
+      - uses: ./.github/actions/release-component
+        with:
+          component: native
+          key: ${{ needs.plan.outputs.native_key }}
+
+  base:
+    name: Build or reuse Debian 13 ARM64 rootfs
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: work/manual-release
+      - uses: ./.github/actions/release-component
+        with:
+          component: base
+          key: ${{ needs.plan.outputs.base_key }}
+          rebuild: ${{ inputs.rebuild == 'base' || inputs.rebuild == 'all' }}
+
+  mesa:
+    name: Build or reuse Mesa Zink & Turnip ARM64
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: work/manual-release
+      - uses: ./.github/actions/release-component
+        with:
+          component: mesa
+          key: ${{ needs.plan.outputs.mesa_key }}
+          rebuild: ${{ inputs.rebuild == 'mesa' || inputs.rebuild == 'all' }}
+
+  image:
+    name: Assemble Antigravity ARM64 environment image
+    needs: [client, base, mesa]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: work/manual-release
+      - uses: actions/download-artifact@v4
+        with:
+          name: component-client
+          path: work/manual-release/components/client
+      - uses: actions/download-artifact@v4
+        with:
+          name: component-base
+          path: work/manual-release/components/base
+      - uses: actions/download-artifact@v4
+        with:
+          name: component-mesa
+          path: work/manual-release/components/mesa
+      - run: python3 -B tools/ci/manual_runner.py prepare
+      - name: Unpack verified components
+        run: |
+          python3 -B tools/ci/release_components.py unpack client
+          python3 -B tools/ci/release_components.py unpack base
+          python3 -B tools/ci/release_components.py unpack mesa
+      - run: python3 -B tools/ci/manual_release.py image
+      - run: python3 -B tools/ci/manual_runner.py compact
+      - run: python3 -B tools/ci/release_components.py pack image
+      - uses: actions/upload-artifact@v4
+        with:
+          name: component-image
+          path: work/manual-release/components/image
+          retention-days: 3
+          compression-level: 0
+          overwrite: true
+          if-no-files-found: error
+      - if: always()
+        uses: ./.github/actions/release-diagnostics
+
+  apk:
+    name: Build, sign & verify full Android APK
+    needs: [image, native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-plan
+          path: work/manual-release
+      - uses: actions/download-artifact@v4
+        with:
+          name: component-image
+          path: work/manual-release/components/image
+      - uses: actions/download-artifact@v4
+        with:
+          name: component-native
+          path: work/manual-release/components/native
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: python3 -B tools/ci/manual_runner.py prepare
+      - name: Unpack image and native baseline
+        run: |
+          python3 -B tools/ci/release_components.py unpack image
+          python3 -B tools/ci/release_components.py unpack native
+      - run: python3 -B tools/ci/manual_runner.py android
+      - run: python3 -B tools/ci/manual_release.py native
+      - name: Build and sign full APK
+        env:
+          AGY_KEYSTORE_BASE64: ${{ secrets.AGY_KEYSTORE_BASE64 }}
+          AGY_SIGNING_STORE_PASSWORD: ${{ secrets.AGY_SIGNING_STORE_PASSWORD }}
+          AGY_SIGNING_KEY_ALIAS: ${{ secrets.AGY_SIGNING_KEY_ALIAS }}
+          AGY_SIGNING_KEY_PASSWORD: ${{ secrets.AGY_SIGNING_KEY_PASSWORD }}
+        run: python3 -B tools/ci/manual_release.py apk
+      - name: Upload verified full APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-full-apk
+          path: work/manual-release/release
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+          if-no-files-found: error
+      - if: always()
+        uses: ./.github/actions/release-diagnostics
+      - name: Remove temporary signing file
+        if: always()
+        run: python3 -c 'import os,pathlib; (pathlib.Path(os.environ["RUNNER_TEMP"])/"agy-release.keystore").unlink(missing_ok=True)'
+
+  publish:
+    name: Publish GitHub Release
+    needs: apk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-full-apk
+          path: work/manual-release/release
+      - name: Publish Release with APK & SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B tools/ci/manual_release.py publish
+      - if: always()
+        uses: ./.github/actions/release-diagnostics

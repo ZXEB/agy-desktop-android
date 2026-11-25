@@ -1,0 +1,31 @@
+// Reuse exactly the APK-owned transport selected by the CI native baseline.
+// The candidate builder separately verifies the APK certificate and every JNI byte.
+gradle.projectsEvaluated {
+    def selected = System.getenv('CODEX_BASELINE_APK')
+    def expected = System.getenv('CODEX_BASELINE_APK_SHA256')
+    if (!selected || !(expected ==~ /[0-9a-f]{64}/))
+        throw new GradleException('Select a pinned native baseline APK explicitly')
+    def baseline = new File(selected).canonicalFile
+    def task = rootProject.project(':shizukuTransport').tasks.named('preBuild').get()
+    task.actions.clear()
+    task.doFirst {
+        def digest = { InputStream stream ->
+            def hash = java.security.MessageDigest.getInstance('SHA-256')
+            byte[] buffer = new byte[1024 * 1024]
+            int count
+            while ((count = stream.read(buffer)) != -1) hash.update(buffer, 0, count)
+            hash.digest().encodeHex().toString()
+        }
+        if (baseline.withInputStream { digest(it) } != expected)
+            throw new GradleException('Native baseline APK changed')
+        new java.util.zip.ZipFile(baseline).withCloseable { zip ->
+            ['libcodex_shizuku_transport.so', 'libcodex_bionic_cwd.so'].each { name ->
+                def entry = zip.getEntry('lib/arm64-v8a/' + name)
+                def frozen = new File(rootProject.property('codexFrozenTransportJni'), 'arm64-v8a/' + name)
+                if (entry == null || !frozen.isFile()
+                        || zip.getInputStream(entry).withCloseable { digest(it) } != frozen.withInputStream { digest(it) })
+                    throw new GradleException('Transport differs from the verified APK: ' + name)
+            }
+        }
+    }
+}

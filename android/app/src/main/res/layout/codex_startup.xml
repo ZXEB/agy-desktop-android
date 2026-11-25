@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="#0B1220">
+    <com.ai.codex.StartupLogView android:id="@+id/startup_logs"
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:importantForAccessibility="no" android:clickable="false" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="center" android:orientation="vertical" android:gravity="center"
+        android:padding="24dp" android:elevation="8dp">
+    <ImageView android:layout_width="76dp" android:layout_height="76dp" android:src="@drawable/codex_icon" android:contentDescription="Antigravity" />
+    <TextView android:id="@+id/startup_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="24dp" android:gravity="center" android:text="正在启动 Google Antigravity…"
+        android:textSize="20sp" android:textColor="#FFFFFF" android:accessibilityLiveRegion="polite" />
+    <ProgressBar android:id="@+id/startup_progress" android:layout_width="32dp" android:layout_height="32dp"
+        android:layout_marginTop="24dp" android:indeterminateTint="#60A5FA" />
+    <Button android:id="@+id/retry_chatgpt" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:layout_marginTop="24dp" android:text="重试" android:visibility="gone" />
+    <Button android:id="@+id/startup_details" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="查看诊断" android:visibility="gone" />
+    </LinearLayout>
+</FrameLayout>

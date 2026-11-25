@@ -1,0 +1,22 @@
+name: Preserve release diagnostics
+description: Retain small public build logs, never signing keys or phone profiles
+runs:
+  using: composite
+  steps:
+    - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: manual-build-diagnostics-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+        retention-days: 7
+        if-no-files-found: ignore
+        path: |
+          work/manual-release/plan.json
+          work/manual-release/logs/*.log
+          work/manual-release/candidate/build-report.json
+          work/manual-release/candidate/*.log
+          work/manual-release/candidate/*verification.json
+          downloads/engine-gnu-arm64/**/build-*.log
+          downloads/engine-gnu-arm64/**/toolchain.json
+          work/manual-release/phone-image/evidence/client-apt.log
+          work/manual-release/release/build-info.json
+          work/manual-release/release/SHA256SUMS
+          work/manual-release/assembly-engine-compatibility.json

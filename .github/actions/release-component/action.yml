@@ -1,0 +1,94 @@
+name: Build or reuse a release component
+description: Verify a recipe-specific cache, build only on a miss, and retain the completed component immediately
+inputs:
+  component:
+    description: base, mesa, engine, or native
+    required: true
+  key:
+    description: Exact selected input and recipe fingerprint
+    required: true
+  rebuild:
+    description: Ignore the existing component cache
+    default: 'false'
+outputs:
+  digest:
+    description: SHA256 of the completed component descriptor
+    value: ${{ steps.verified.outputs.digest }}
+runs:
+  using: composite
+  steps:
+    - name: Restore matching completed component
+      if: inputs.rebuild != 'true'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: work/manual-release/components/${{ inputs.component }}
+        key: release-${{ inputs.component }}-v1-${{ inputs.key }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: release-${{ inputs.component }}-v1-${{ inputs.key }}-
+    - name: Verify the restored component inventory
+      id: probe
+      shell: bash
+      env:
+        COMPONENT: ${{ inputs.component }}
+        COMPONENT_KEY: ${{ inputs.key }}
+      run: python3 -B tools/ci/release_components.py probe "$COMPONENT" --key "$COMPONENT_KEY"
+    - name: Prepare disposable compiler host on a cache miss
+      if: steps.probe.outputs.ready != 'true' && inputs.component != 'native'
+      shell: bash
+      run: python3 -B tools/ci/manual_runner.py prepare
+    - name: Restore Cargo source downloads
+      if: steps.probe.outputs.ready != 'true' && inputs.component == 'engine'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          work/ci/cache/cargo/registry
+          work/ci/cache/cargo/git
+        key: cargo-downloads-v1-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: cargo-downloads-v1-
+    - name: Download authenticated base for a new engine build
+      if: steps.probe.outputs.ready != 'true' && inputs.component == 'engine'
+      uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+      with:
+        name: component-base
+        path: work/manual-release/components/base
+    - name: Build only the missing component
+      if: steps.probe.outputs.ready != 'true'
+      shell: bash
+      env:
+        COMPONENT: ${{ inputs.component }}
+        COMPONENT_KEY: ${{ inputs.key }}
+      run: python3 -B tools/ci/release_components.py build "$COMPONENT" --key "$COMPONENT_KEY"
+    - name: Verify the completed component
+      id: verified
+      shell: bash
+      env:
+        COMPONENT: ${{ inputs.component }}
+        COMPONENT_KEY: ${{ inputs.key }}
+      run: python3 -B tools/ci/release_components.py probe "$COMPONENT" --key "$COMPONENT_KEY"
+    - name: Cache the completed component for later manual builds
+      if: steps.probe.outputs.ready != 'true'
+      continue-on-error: true
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: work/manual-release/components/${{ inputs.component }}
+        key: release-${{ inputs.component }}-v1-${{ inputs.key }}-${{ github.run_id }}-${{ github.run_attempt }}
+    - name: Preserve this run's completed component
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: component-${{ inputs.component }}
+        path: work/manual-release/components/${{ inputs.component }}
+        compression-level: 0
+        retention-days: 3
+        overwrite: true
+        if-no-files-found: error
+    - name: Save Cargo downloads even when compilation fails
+      if: always() && steps.probe.outputs.ready != 'true' && inputs.component == 'engine'
+      continue-on-error: true
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          work/ci/cache/cargo/registry
+          work/ci/cache/cargo/git
+        key: cargo-downloads-v1-${{ github.run_id }}-${{ github.run_attempt }}
+    - name: Preserve component diagnostics
+      if: always()
+      uses: ./.github/actions/release-diagnostics
